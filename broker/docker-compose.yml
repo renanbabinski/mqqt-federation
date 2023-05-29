@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+  mosquitto:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 1881:1883
