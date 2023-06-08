@@ -1,9 +1,37 @@
 version: '3'
 
 services:
-  mosquitto:
+  mosquitto0:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 1880:1883
+
+  mosquitto1:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - 1881:1883
+
+  # mosquitto2:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - 1882:1883
+
+  mosquitto3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 1883:1883
+
+  mosquitto4:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 1884:1883
