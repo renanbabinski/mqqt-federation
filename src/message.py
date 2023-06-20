@@ -20,6 +20,9 @@ class SubLog:
     def __init__(self, payload) -> None:
         self.payload = payload
 
+    def __str__(self) -> str:
+        return f"SubLog(payload={self.payload})"
+
 class FederatedPub:
     def __init__(self, payload) -> None:
         self.payload = payload
@@ -38,11 +41,26 @@ class CoreAnn:
         payload = pickle.dumps(self)
 
         return topic, payload
+    
+class MeshMembAnn:
+    def __init__(self, core_id:int, sender_id: int) -> None:
+        self.core_id = core_id
+        self.sender_id = sender_id
+
+    def __str__(self) -> str:
+        return f"MeshMembAnn(core_id={self.core_id}, sender_id={self.sender_id})"
+
+    def serialize(self, fed_topic: str) -> Tuple[str, bytes]:
+        topic = f"{MEMB_ANN_TOPIC_LEVEL}{fed_topic}"
+        payload = pickle.dumps(self)
+
+        return topic, payload
 
 class Message(Enum):
     SubLog = SubLog
     FederatedPub = FederatedPub
     CoreAnn = CoreAnn
+    MeshMembAnn = MeshMembAnn
 
 
 def deserialize(mqtt_msg: mqtt.MQTTMessage) -> Tuple[str, Message]:
@@ -53,12 +71,6 @@ def deserialize(mqtt_msg: mqtt.MQTTMessage) -> Tuple[str, Message]:
     #     assert fed_topic, "Empty federated topic"
     #     routed_pub = mqtt_msg.payload.decode('utf-8')
     #     return fed_topic, Message("RoutedPub", routed_pub)
-
-    # elif topic.startswith(MEMB_ANN_TOPIC_LEVEL):
-    #     fed_topic = topic[len(MEMB_ANN_TOPIC_LEVEL):]
-    #     assert fed_topic, "Empty federated topic"
-    #     memb_ann = mqtt_msg.payload.decode('utf-8')
-    #     return fed_topic, Message("MeshMembAnn", memb_ann)
     
     if topic.startswith(SUB_LOGS_TOPIC_LEVEL):
         fed_topic = mqtt_msg.payload.decode('utf-8').split(' ')[-1] ## Get last element (topic)
@@ -84,16 +96,22 @@ def deserialize(mqtt_msg: mqtt.MQTTMessage) -> Tuple[str, Message]:
         core_ann = pickle.loads(mqtt_msg.payload)
         return fed_topic, core_ann
     
-    # Federated Publications will ever be last match "#"
-    elif topic.startswith(FEDERATED_TOPICS_LEVEL):
-        fed_topic = topic[len(FEDERATED_TOPICS_LEVEL):]
+    elif topic.startswith(MEMB_ANN_TOPIC_LEVEL):
+        fed_topic = topic[len(MEMB_ANN_TOPIC_LEVEL):]
         assert fed_topic, "Empty federated topic"
-        # federated_pub = FederatedPub(mqtt_msg.payload)
-        payload = mqtt_msg.payload.decode('utf-8')
-        federated_pub = FederatedPub(
-            payload=payload
-        )
-        return fed_topic, Message.FederatedPub.value(federated_pub)
+        memb_ann = pickle.loads(mqtt_msg.payload)
+        return fed_topic, memb_ann
+    
+    # Federated Publications will ever be last match "#"
+    # elif topic.startswith(FEDERATED_TOPICS_LEVEL):
+    #     fed_topic = topic[len(FEDERATED_TOPICS_LEVEL):]
+    #     assert fed_topic, "Empty federated topic"
+    #     # federated_pub = FederatedPub(mqtt_msg.payload)
+    #     payload = mqtt_msg.payload.decode('utf-8')
+    #     federated_pub = FederatedPub(
+    #         payload=payload
+    #     )
+    #     return fed_topic, Message.FederatedPub.value(federated_pub)
 
 
     else:

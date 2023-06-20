@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import List, Dict
 import paho.mqtt.client as mqtt
 from conf import FederatorConfig, BrokerConfig
-from message import deserialize, Message, SubLog, FederatedPub, CoreAnn
+from message import deserialize, Message, SubLog, FederatedPub, CoreAnn, MeshMembAnn
 from topics import CORE_ANNS, MEMB_ANNS, FEDERATED_TOPICS, ROUTING_TOPICS, SUB_LOGS
 from worker import TopicWorkerHandle
 
@@ -52,6 +52,7 @@ class Federator:
                     continue
             except Exception as e:
                 logger.error(e)
+                continue
 
             # Creating queues and workers
             if federated_topic in self.topic_queues:
@@ -139,7 +140,7 @@ def connect_neighbors(neighbors_clients: Dict[int, mqtt.Client], n_configs: List
 
 # Callback for when a message is received from the server.
 def on_message(client, userdata: asyncio.Queue, msg: mqtt.MQTTMessage):
-    # logger.debug(f"New message in topic {msg.topic}. Message: {msg.payload.decode('utf-8')}")
+    # logger.debug(f"New message in topic {msg.topic}. Message: {msg}")
     sync_queue.put(msg)
 
 

@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from message import Message, SubLog, FederatedPub, CoreAnn
+from message import Message, SubLog, FederatedPub, CoreAnn, MeshMembAnn
 import paho.mqtt.client as mqtt
 from announcer import Announcer
 import copy
@@ -46,7 +46,7 @@ class TopicWorker:
         self.topic = topic
         self.ctx:Context = ctx
         self.queue = queue
-        self.children = {}
+        self.children = []
         self.current_core = None
         self.next_id = 0
 
@@ -64,6 +64,9 @@ class TopicWorker:
         elif isinstance(msg, CoreAnn):
             logger.debug(f"WORKER[{self.topic}]:Handle CoreAnn...")
             await self.handle_core_ann(msg)
+        elif isinstance(msg, MeshMembAnn):
+            logger.debug(f"WORKER[{self.topic}]:Handle MeshMembAnn...")
+            await self.handle_memb_ann(msg)
         else:
             logger.error(f"WORKER[{self.topic}]:No Handle for this message type!")
 
@@ -79,12 +82,18 @@ class TopicWorker:
             self.current_core = self.ctx.id
             self.children.clear() ## Verify if is necessary
 
+        else:  ## Current Core is another broker
+            if isinstance(self.current_core, CoreBroker):
+                logger.debug(f"WORKER[{self.topic}]: Answer parents...")
+                await self.answer_parents()
+
+
 
     async def handle_core_ann(self, core_ann: CoreAnn):
         logger.debug(f"WORKER[{self.topic}]:Handling CoreAnn...")
 
         if core_ann.core_id == self.ctx.id or core_ann.sender_id == self.ctx.id:
-            logger.debug("Core ID or Sender are Myself!")
+            logger.debug(f"WORKER[{self.topic}]:Core ID or Sender are Myself!")
             return
         
         core_ann.dist += 1 # consider distance from the neighbor to me
@@ -159,6 +168,33 @@ class TopicWorker:
 
 
 
+
+    async def handle_memb_ann(self, memb_ann: MeshMembAnn):
+        logger.debug(f"WORKER[{self.topic}]:Handling MeshMembAnn...")
+        if memb_ann.sender_id == self.ctx.id:
+            logger.debug(f"WORKER[{self.topic}]:Sender are Myself!")
+            return
+        
+        logger.info(f"WORKER[{self.topic}]:Received a Mesh Member Announcement")
+
+        current_core_id = self.current_core.id if isinstance(self.current_core, CoreBroker) else self.current_core
+
+        if current_core_id == memb_ann.core_id:
+            if memb_ann.core_id == self.ctx.id:
+                if memb_ann.sender_id not in self.children:
+                    self.children.append(memb_ann.sender_id)
+            else:
+                if memb_ann.sender_id not in self.children:
+                    self.children.append(memb_ann.sender_id)
+                logger.debug(f"WORKER[{self.topic}]: Answer parents...")
+                await self.answer_parents()
+        else:
+            logger.error(f"WORKER[{self.topic}]:current_core_id and MeshMembAnn.core_id does not match!")
+
+        logger.debug(f"WORKER[{self.topic}]: Children list: {self.children}") 
+
+
+
     async def forward(self, core_ann: CoreAnn):
         topic, payload = CoreAnn(
             core_id=core_ann.core_id,
@@ -168,6 +204,16 @@ class TopicWorker:
 
         for id, neighbor in self.ctx.neighbors.items():
             if id != core_ann.sender_id:
+                neighbor.publish(topic, payload, NEIGHBORS_QOS)
+
+    async def answer_parents(self):
+        topic, payload = MeshMembAnn(
+            core_id=self.current_core.id,
+            sender_id=self.ctx.id
+        ).serialize(self.topic)
+
+        for id, neighbor in self.ctx.neighbors.items():
+            if id in self.current_core.parents:
                 neighbor.publish(topic, payload, NEIGHBORS_QOS)
 
 
