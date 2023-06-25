@@ -3,7 +3,7 @@ import fnmatch
 import logging
 import pickle
 from typing import Tuple
-from enum import Enum
+from dataclasses import dataclass
 from topics import CORE_ANN_TOPIC_LEVEL, MEMB_ANN_TOPIC_LEVEL, FEDERATED_TOPICS_LEVEL, ROUTING_TOPICS_LEVEL, SUB_LOGS_TOPIC_LEVEL
 from topics import CORE_ANNS, MEMB_ANNS, ROUTING_TOPICS, SUB_LOGS, FEDERATED_TOPICS
 
@@ -15,6 +15,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+# frozen=True make this dataclass immutable and give __hash__ method to class
+@dataclass(frozen=True)
+class PubId:
+    origin_id:int
+    seqn:int
 
 class SubLog:
     def __init__(self, payload) -> None:
@@ -26,6 +31,14 @@ class SubLog:
 class FederatedPub:
     def __init__(self, payload) -> None:
         self.payload = payload
+
+    def __str__(self) -> str:
+        return f"FederatedPub(payload={self.payload})"
+    
+    def serialize(self, fed_topic: str) -> Tuple[str, bytes]:
+        topic = f"{FEDERATED_TOPICS_LEVEL}{fed_topic}"
+
+        return topic, self.payload
 
 class CoreAnn:
     def __init__(self, core_id, dist, sender_id) -> None:
@@ -55,26 +68,26 @@ class MeshMembAnn:
         payload = pickle.dumps(self)
 
         return topic, payload
-
-class Message(Enum):
-    SubLog = SubLog
-    FederatedPub = FederatedPub
-    CoreAnn = CoreAnn
-    MeshMembAnn = MeshMembAnn
-
-
-def deserialize(mqtt_msg: mqtt.MQTTMessage) -> Tuple[str, Message]:
-    topic:str = mqtt_msg.topic
-
-    # if topic.startswith(ROUTING_TOPICS_LEVEL):
-    #     fed_topic = topic[len(ROUTING_TOPICS_LEVEL):]
-    #     assert fed_topic, "Empty federated topic"
-    #     routed_pub = mqtt_msg.payload.decode('utf-8')
-    #     return fed_topic, Message("RoutedPub", routed_pub)
     
+class RoutedPub:
+    def __init__(self, pub_id: PubId, sender_id:int, payload) -> None:
+        self.pub_id = pub_id
+        self.sender_id = sender_id
+        self.payload = payload
+
+    def __str__(self) -> str:
+        return f"RoutedPub(pub_id={self.pub_id}, sender_id={self.sender_id}, payload={self.payload})"
+
+    def serialize(self, fed_topic: str) -> Tuple[str, bytes]:
+        topic = f"{ROUTING_TOPICS_LEVEL}{fed_topic}"
+        payload = pickle.dumps(self)
+
+        return topic, payload
+
+def deserialize(mqtt_msg: mqtt.MQTTMessage) -> Tuple[str, object]:
+    topic:str = mqtt_msg.topic
     if topic.startswith(SUB_LOGS_TOPIC_LEVEL):
         fed_topic = mqtt_msg.payload.decode('utf-8').split(' ')[-1] ## Get last element (topic)
-        # print(mqtt_msg.payload.decode('utf-8'))
         if  fnmatch.fnmatch(fed_topic, SUB_LOGS) or \
             fnmatch.fnmatch(fed_topic, ROUTING_TOPICS) or \
             fnmatch.fnmatch(fed_topic, MEMB_ANNS) or \
@@ -86,9 +99,9 @@ def deserialize(mqtt_msg: mqtt.MQTTMessage) -> Tuple[str, Message]:
         else:
             payload = mqtt_msg.payload.decode('utf-8')
             sub_log = SubLog(
-                payload=payload
+                payload
             )
-            return fed_topic, Message.SubLog.value(sub_log)
+            return fed_topic, sub_log
         
     elif topic.startswith(CORE_ANN_TOPIC_LEVEL):
         fed_topic = topic[len(CORE_ANN_TOPIC_LEVEL):]
@@ -102,17 +115,21 @@ def deserialize(mqtt_msg: mqtt.MQTTMessage) -> Tuple[str, Message]:
         memb_ann = pickle.loads(mqtt_msg.payload)
         return fed_topic, memb_ann
     
+    elif topic.startswith(ROUTING_TOPICS_LEVEL):
+        fed_topic = topic[len(ROUTING_TOPICS_LEVEL):]
+        assert fed_topic, "Empty federated topic"
+        routed_pub = pickle.loads(mqtt_msg.payload)
+        return fed_topic, routed_pub
+    
     # Federated Publications will ever be last match "#"
-    # elif topic.startswith(FEDERATED_TOPICS_LEVEL):
-    #     fed_topic = topic[len(FEDERATED_TOPICS_LEVEL):]
-    #     assert fed_topic, "Empty federated topic"
-    #     # federated_pub = FederatedPub(mqtt_msg.payload)
-    #     payload = mqtt_msg.payload.decode('utf-8')
-    #     federated_pub = FederatedPub(
-    #         payload=payload
-    #     )
-    #     return fed_topic, Message.FederatedPub.value(federated_pub)
-
+    elif topic.startswith(FEDERATED_TOPICS_LEVEL):
+        fed_topic = topic[len(FEDERATED_TOPICS_LEVEL):]
+        assert fed_topic, "Empty federated topic"
+        payload = mqtt_msg.payload
+        federated_pub = FederatedPub(
+            payload
+        )
+        return fed_topic, federated_pub
 
     else:
         raise ValueError(f"Received a packet from a topic it was not supposed to be subscribed to {topic}")
