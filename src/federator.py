@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import List, Dict
 import paho.mqtt.client as mqtt
 from conf import FederatorConfig, BrokerConfig
-from message import deserialize, Message, SubLog, FederatedPub, CoreAnn, MeshMembAnn
+from message import deserialize, SubLog, FederatedPub, CoreAnn, MeshMembAnn
 from topics import CORE_ANNS, MEMB_ANNS, FEDERATED_TOPICS, ROUTING_TOPICS, SUB_LOGS
 from worker import TopicWorkerHandle
 
@@ -30,6 +30,7 @@ sync_queue = queue.Queue()
 class Context:
     id: int
     redundancy: int
+    cache_size: int
     neighbors: Dict[int, mqtt.Client]
     host_client: mqtt.Client
 
@@ -72,19 +73,22 @@ class Federator:
     async def subscribe(self) -> None:
         logger.debug("Subscribing host to topics...")
         topics = [
-            (CORE_ANNS, HOST_QOS),
-            (MEMB_ANNS, HOST_QOS),
-            (ROUTING_TOPICS, HOST_QOS),
-            (FEDERATED_TOPICS, HOST_QOS),
-            (SUB_LOGS, HOST_QOS)
+            CORE_ANNS, 
+            MEMB_ANNS, 
+            ROUTING_TOPICS, 
+            FEDERATED_TOPICS, 
+            SUB_LOGS
         ]
-
-        self.ctx.host_client.subscribe(topics)
-        logger.info(f"{topics} Subscribed on host Broker!")
+        
+        for topic in topics:
+            self.ctx.host_client.subscribe(topic, options=mqtt.SubscribeOptions(qos=HOST_QOS, noLocal=True))
+            logger.info(f"{topic} Subscribed on host Broker!")
+        
 
         for id, n_client in self.ctx.neighbors.items():
-            n_client.subscribe(topics)
-            logger.info(f"{topics} Subscribed in neighbor Broker {id}")
+            for topic in topics:
+                n_client.subscribe(topic, options=mqtt.SubscribeOptions(qos=HOST_QOS, noLocal=True))
+                logger.info(f"{topic} Subscribed in neighbor Broker {id}")
         
 
 
@@ -105,7 +109,8 @@ def create_neighbors_clients(configs: FederatorConfig) -> Dict[int, mqtt.Client]
         logger.debug(f"Creating client for Neighbor Broker {neigh_conf.id, neigh_conf.ip}")
         try:
             client = mqtt.Client(
-                client_id=f"Federator #{configs.host.id} Neighbor client {neigh_conf.id}"
+                client_id=f"Federator #{configs.host.id} Neighbor client {neigh_conf.id}",
+                protocol=mqtt.MQTTv5
             )
             neighbors[neigh_conf.id] = client
         except:
@@ -116,7 +121,8 @@ def create_neighbors_clients(configs: FederatorConfig) -> Dict[int, mqtt.Client]
 
 def create_host_client(id: int) -> mqtt.Client:
     client = mqtt.Client(
-        client_id=f"Federator #{id} Host client {id}"
+        client_id=f"Federator #{id} Host client {id}",
+        protocol=mqtt.MQTTv5
     )
     
     return client
@@ -139,8 +145,8 @@ def connect_neighbors(neighbors_clients: Dict[int, mqtt.Client], n_configs: List
 
 
 # Callback for when a message is received from the server.
-def on_message(client, userdata: asyncio.Queue, msg: mqtt.MQTTMessage):
-    # logger.debug(f"New message in topic {msg.topic}. Message: {msg}")
+def on_message(client, userdata, msg: mqtt.MQTTMessage):
+    # logger.debug(f"New message in topic {msg.topic}. Message: {msg} CLIENT TYPE: [{userdata['client_type']}] MID: [{msg.mid}]")
     sync_queue.put(msg)
 
 
@@ -151,9 +157,9 @@ def run(config: FederatorConfig) -> None:
 
     host_client = create_host_client(config.host.id)
 
-    host_client.on_message = on_message
-
     connect_host(host_client, config.host.ip, config.host.port)
+
+    host_client.on_message = on_message
 
     host_client.loop_start()
 
@@ -162,6 +168,7 @@ def run(config: FederatorConfig) -> None:
     ctx = Context(
         id=config.host.id,
         redundancy=config.redundancy,
+        cache_size=config.cache_size,
         neighbors=neighbors_clients, #Lock
         host_client=host_client
     )
