@@ -11,6 +11,7 @@ class BrokerConfig:
 @dataclass
 class FederatorConfig:
     redundancy: int
+    cache_size: int
     host: BrokerConfig
     neighbors: List[BrokerConfig]
 
@@ -30,6 +31,7 @@ def read_config_file(file_path):
     try:
         # Extract the values from the parsed TOML data
         redundancy = config_data['redundancy']
+        cache_size = config_data['cache_size']
 
         host_data = config_data['host']
         host = BrokerConfig(id=host_data['id'], ip=host_data['ip'], port=host_data['port'])
@@ -40,6 +42,7 @@ def read_config_file(file_path):
         # Create the FederatorConfig object
         federator_config = FederatorConfig(
             redundancy=redundancy,
+            cache_size=cache_size,
             host=host,
             neighbors=neighbors
         )
