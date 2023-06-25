@@ -1,10 +1,12 @@
 import logging
 import asyncio
-from message import Message, SubLog, FederatedPub, CoreAnn, MeshMembAnn
+from message import SubLog, FederatedPub, CoreAnn, MeshMembAnn, PubId, RoutedPub
 import paho.mqtt.client as mqtt
 from announcer import Announcer
 import copy
+from lru import LRUCache
 
+HOST_QOS = 2
 NEIGHBORS_QOS = 2
 
 logging.basicConfig(
@@ -49,15 +51,16 @@ class TopicWorker:
         self.children = []
         self.current_core = None
         self.next_id = 0
-
+        self.cache = LRUCache(self.ctx.cache_size)
+        self.has_local_subs = False
 
     async def start(self):
         while True:
-            msg: Message = await self.queue.get()
+            msg = await self.queue.get()
             logger.debug(f"WORKER[{self.topic}]: Message received {msg}")
             await self.handle(msg)
 
-    async def handle(self, msg: Message):
+    async def handle(self, msg):
         if isinstance(msg, SubLog):
             logger.debug(f"WORKER[{self.topic}]:Handle new sub...")
             await self.handle_sub()
@@ -67,6 +70,12 @@ class TopicWorker:
         elif isinstance(msg, MeshMembAnn):
             logger.debug(f"WORKER[{self.topic}]:Handle MeshMembAnn...")
             await self.handle_memb_ann(msg)
+        elif isinstance(msg, FederatedPub):
+            logger.debug(f"WORKER[{self.topic}]:Handle FederatedPub...")
+            await self.handle_publication(msg)
+        elif isinstance(msg, RoutedPub):
+            logger.debug(f"WORKER[{self.topic}]:Handle RoutedPub...")
+            await self.handle_routed_pub(msg)
         else:
             logger.error(f"WORKER[{self.topic}]:No Handle for this message type!")
 
@@ -79,12 +88,14 @@ class TopicWorker:
             logger.debug(f"WORKER[{self.topic}]: Will start announcing as {self.topic} Core...")
             announcer = Announcer(self.topic)
             announcer.announce(copy.copy(self.ctx))
+            self.has_local_subs = True
             self.current_core = self.ctx.id
             self.children.clear() ## Verify if is necessary
 
         else:  ## Current Core is another broker
             if isinstance(self.current_core, CoreBroker):
                 logger.debug(f"WORKER[{self.topic}]: Answer parents...")
+                self.has_local_subs = True
                 await self.answer_parents()
 
 
@@ -102,7 +113,7 @@ class TopicWorker:
         # - Topic doesn't have a core
         # - Topic have a core broker
         if self.current_core == None:
-            logger.info(f"{core_ann.core_id} is New core elected!")
+            logger.info(f"WORKER[{self.topic}]:{core_ann.core_id} is New core elected!")
 
             self.children.clear()
 
@@ -191,8 +202,87 @@ class TopicWorker:
         else:
             logger.error(f"WORKER[{self.topic}]:current_core_id and MeshMembAnn.core_id does not match!")
 
-        logger.debug(f"WORKER[{self.topic}]: Children list: {self.children}") 
+        logger.debug(f"WORKER[{self.topic}]: Children list: {self.children}")
 
+
+    async def handle_publication(self, federated_pub: FederatedPub):
+        logger.debug(f"WORKER[{self.topic}]:Handling FederatedPub...")
+        new_id = PubId(
+            origin_id=self.ctx.id,
+            seqn=self.next_id
+        )
+
+        logger.debug(f"WORKER[{self.topic}]:current PubId seqn: [{new_id.seqn}]")
+
+        self.next_id += 1
+
+        topic, payload = RoutedPub(
+            pub_id=new_id,
+            payload=federated_pub.payload,
+            sender_id=self.ctx.id
+        ).serialize(self.topic)
+
+        # cache the message id to prevent it from being routed twice
+        self.cache.put(new_id, None)
+
+        # Send to mesh parents
+        if isinstance(self.current_core, CoreBroker):
+            logger.debug(f"WORKER[{self.topic}]:Sending RoutedPub to parents...")
+            await self.send_to(topic, payload, self.current_core.parents)
+
+
+        # Send to mesh children
+        logger.debug(f"WORKER[{self.topic}]:Sending RoutedPub to children...")
+        await self.send_to(topic, payload, self.children)
+
+        logger.debug(f"WORKER[{self.topic}]:Cache[{self.cache}]")
+
+
+
+    async def handle_routed_pub(self, routed_pub: RoutedPub):
+        logger.debug(f"WORKER[{self.topic}]:Handling RoutedPub...")
+        # Check if message was already routed
+        if self.cache.contains(routed_pub.pub_id):
+            logger.debug(f"WORKER[{self.topic}]:CACHE: Already routed this pub: {routed_pub.pub_id}")
+            return
+        
+        self.cache.put(routed_pub.pub_id, None)
+
+        # Send to local subscribers
+        if self.has_local_subs:
+            logger.debug(f"WORKER[{self.topic}]:Routing pub to local subs...")
+
+            topic, payload = FederatedPub(
+                payload=routed_pub.payload
+            ).serialize(self.topic)
+            
+            self.ctx.host_client.publish(topic, payload, HOST_QOS)
+        
+        # Set sender_id to myself
+        sender_id = routed_pub.sender_id
+        routed_pub.sender_id = self.ctx.id
+
+        topic, payload = routed_pub.serialize(self.topic)
+
+        # Send to mesh parents
+        if isinstance(self.current_core, CoreBroker):
+            logger.debug(f"WORKER[{self.topic}]:Sending RoutedPub to parents...")
+            parents = list(self.current_core.parents)
+            try:  # Try to remove sender id from parents, if not exist, continue
+                parents.remove(sender_id)
+            except ValueError:
+                pass
+            await self.send_to(topic, payload, parents)
+
+        # Send to mesh children
+        logger.debug(f"WORKER[{self.topic}]:Sending RoutedPub to children...")
+        children = list(self.children)
+        try:  # Try to remove sender id from parents, if not exist, continue
+            children.remove(sender_id)
+        except ValueError:
+            pass
+        await self.send_to(topic, payload, children)
+        
 
 
     async def forward(self, core_ann: CoreAnn):
@@ -217,5 +307,11 @@ class TopicWorker:
                 neighbor.publish(topic, payload, NEIGHBORS_QOS)
 
 
-
-
+    async def send_to(self, topic:str, payload, ids:list):
+        for id in ids:
+            logger.debug(f"WORKER[{self.topic}]:Sending RoutedPub to [{id}]")
+            neighbor_client = self.ctx.neighbors.get(id, None)
+            if neighbor_client is not None:
+                neighbor_client.publish(topic, payload, NEIGHBORS_QOS)
+            else:
+                logger.error(f"WORKER[{self.topic}]:broker {id} is not a neighbor")
