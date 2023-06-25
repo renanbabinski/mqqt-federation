@@ -27,7 +27,7 @@ if __name__ == "__main__":
         config = read_config_file(args.config)
 
         if config is not None:
-            logger.debug(config.neighbors)
+            logger.debug(config)
 
     else:
         logger.error("Error: Please provide a TOML configuration file using the -c or --config argument.")
