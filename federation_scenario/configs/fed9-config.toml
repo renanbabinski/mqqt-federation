@@ -1,0 +1,22 @@
+redundancy = 2
+cache_size = 500
+
+[host]
+id = 9
+ip = "127.0.0.1"
+port = 1889
+
+[[neighbors]]
+id = 6
+ip = "127.0.0.1"
+port = 1886
+
+[[neighbors]]
+id = 8
+ip = "127.0.0.1"
+port = 1888
+
+
+
+
+
