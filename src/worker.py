@@ -14,7 +14,7 @@ logging.basicConfig(
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 class TopicWorkerHandle:
@@ -93,7 +93,7 @@ class TopicWorker:
             self.children.clear() ## Verify if is necessary
 
         else:  ## Current Core is another broker
-            if isinstance(self.current_core, CoreBroker):
+            if isinstance(self.current_core, CoreBroker) and not self.has_local_subs:
                 logger.debug(f"WORKER[{self.topic}]: Answer parents...")
                 self.has_local_subs = True
                 await self.answer_parents()
@@ -155,7 +155,7 @@ class TopicWorker:
 
                             core.parents.append(core_ann.sender_id)
                     else:
-                        logger.warning(f"WORKER[{self.topic}]:CoreAnn Sender already in CoreBroker parents list")
+                        logger.debug(f"WORKER[{self.topic}]:CoreAnn Sender already in CoreBroker parents list")
                 elif core.dist > core_ann.dist:
                     logger.debug(f"WORKER[{self.topic}]:Received CoreAnn with LESS distance, CLEANING PARENTS!")
                     core.dist = core_ann.dist

@@ -8,7 +8,7 @@ logging.basicConfig(
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 class Announcer:
     def __init__(self, federated_topic) -> None:

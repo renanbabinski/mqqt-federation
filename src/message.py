@@ -13,7 +13,7 @@ logging.basicConfig(
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # frozen=True make this dataclass immutable and give __hash__ method to class
 @dataclass(frozen=True)

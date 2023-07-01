@@ -21,7 +21,7 @@ logging.basicConfig(
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 rx_queue = asyncio.Queue()
 sync_queue = queue.Queue()
@@ -73,9 +73,6 @@ class Federator:
     async def subscribe(self) -> None:
         logger.debug("Subscribing host to topics...")
         topics = [
-            CORE_ANNS, 
-            MEMB_ANNS, 
-            ROUTING_TOPICS, 
             FEDERATED_TOPICS, 
             SUB_LOGS
         ]
@@ -85,10 +82,10 @@ class Federator:
             logger.info(f"{topic} Subscribed on host Broker!")
         
 
-        for id, n_client in self.ctx.neighbors.items():
-            for topic in topics:
-                n_client.subscribe(topic, options=mqtt.SubscribeOptions(qos=HOST_QOS, noLocal=True))
-                logger.info(f"{topic} Subscribed in neighbor Broker {id}")
+        # for id, n_client in self.ctx.neighbors.items():
+        #     for topic in topics:
+        #         n_client.subscribe(topic, options=mqtt.SubscribeOptions(qos=HOST_QOS, noLocal=True))
+        #         logger.info(f"{topic} Subscribed in neighbor Broker {id}")
         
 
 
@@ -98,7 +95,7 @@ async def bridge_queues():
         while not sync_queue.empty():
             item = sync_queue.get()
             await rx_queue.put(item)
-        await asyncio.sleep(0.01)  # avoid busy-waiting
+        await asyncio.sleep(0.001)  # avoid busy-waiting
 
 
 
