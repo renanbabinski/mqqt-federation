@@ -1,5 +1,5 @@
 redundancy = 2
-cache_size = 10000
+cache_size = 500
 
 [host]
 id = 2
